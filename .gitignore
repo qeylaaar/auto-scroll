@@ -1,0 +1,6 @@
+dump/
+*.xlsx
+*.json
+!package.json
+!package-lock.json
+!keywords_komoditi_final.json
