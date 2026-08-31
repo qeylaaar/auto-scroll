@@ -21,6 +21,8 @@ Setiap task ekstraksi menghasilkan file Excel (.xlsx) dengan struktur kolom:
 ---
 
 ## 🏗️ Struktur Folder Proyek
+
+```
 auto-scroll/
 ├── Data_Kabupaten_Kota_Part_1.xlsx  # Database Wilayah Indonesia Part 1
 ├── Data_Kabupaten_Kota_Part_2.xlsx  # Database Wilayah Indonesia Part 2
@@ -35,7 +37,7 @@ auto-scroll/
 ├── main.js                          # CLI Dashboard & Task Orchestrator Utama
 ├── package.json
 └── readme.md
-
+```
 ---
 
 ## ⚙️ Persyaratan Sistem (Prerequisites)
