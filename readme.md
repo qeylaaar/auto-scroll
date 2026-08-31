@@ -109,3 +109,7 @@ Untuk mempercepat proses pengambilan data 3 part sekaligus di satu perangkat:
 3. Terminal 2: Jalankan node index.js -> Pilih Part 2.
 4. Terminal 3: Jalankan node index.js -> Pilih Part 3.
 5. Setelah Fase 1 selesai, jalankan node extract_detail.js di masing-masing tab sesuai part-nya. Database SQLite akan mengelola status masing-masing data secara aman tanpa terjadi bentrok (race condition).
+
+## 📄 Lisensi
+
+Proyek ini didistribusikan di bawah lisensi **MIT License** - lihat file [LICENSE](LICENSE) untuk detail selengkapnya.
