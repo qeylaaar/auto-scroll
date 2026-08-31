@@ -3,11 +3,17 @@ const ExcelJS = require('exceljs');
 const fs = require('fs');
 const path = require('path');
 const readline = require('readline');
+const { 
+    initUrls, 
+    getPendingUrls, 
+    getAllCrawledData, 
+    updatePlaceCrawled, 
+    updatePlaceFailed 
+} = require('./db');
 
-// BISA DISESUAIKAN (Rekomendasi: 3 - 5 tab biar stabil)
-const CONCURRENCY_LIMIT = 2; 
+const CONCURRENCY_LIMIT = 3; 
 const MAX_RETRIES = 2;
-const RESTART_BROWSER_EVERY = 200; // Reset browser tiap 200 URL biar RAM gak penuh
+const RESTART_BROWSER_EVERY = 150;
 
 function askQuestion(query) {
     const rl = readline.createInterface({
@@ -25,13 +31,15 @@ async function saveToExcel(dataList, filePath) {
     const worksheet = workbook.addWorksheet('Sheet1');
 
     worksheet.columns = [
-        { header: 'Name', key: 'name', width: 30 },
+        { header: 'Name', key: 'name', width: 32 },
         { header: 'Fulladdress', key: 'fullAddress', width: 45 },
-        { header: 'Email', key: 'email', width: 25 },
+        { header: 'Email', key: 'email', width: 20 },
         { header: 'Categories', key: 'category', width: 25 },
         { header: 'Phones', key: 'phones', width: 20 },
         { header: 'Latitude', key: 'latitude', width: 15 },
-        { header: 'Longitude', key: 'longitude', width: 15 }
+        { header: 'Longitude', key: 'longitude', width: 15 },
+        { header: 'Rating', key: 'rating', width: 10 },
+        { header: 'Total Reviews', key: 'totalReviews', width: 15 }
     ];
 
     dataList.forEach(item => worksheet.addRow(item));
@@ -43,10 +51,12 @@ async function saveToExcel(dataList, filePath) {
         fgColor: { argb: '1F4E78' }
     };
 
+    worksheet.getColumn('rating').alignment = { horizontal: 'center' };
+    worksheet.getColumn('totalReviews').alignment = { horizontal: 'center' };
+
     await workbook.xlsx.writeFile(filePath);
 }
 
-// LOGIKA SINGLE SCRAPE UNTUK 1 URL
 async function scrapeSingleUrl(browser, url) {
     const page = await browser.newPage();
     
@@ -60,11 +70,11 @@ async function scrapeSingleUrl(browser, url) {
     });
 
     try {
-        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 10000 });
-        await page.waitForSelector('h1', { timeout: 3000 }).catch(() => null);
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 12000 });
+        await page.waitForSelector('h1', { timeout: 4000 }).catch(() => null);
 
         const data = await page.evaluate((currentUrl) => {
-            const h1El = document.querySelector('h1.DUwif, h1');
+            const h1El = document.querySelector('h1.DUwDvf, h1');
             const name = h1El ? h1El.innerText.trim() : '';
 
             let fullAddress = '';
@@ -96,12 +106,26 @@ async function scrapeSingleUrl(browser, url) {
             const catBtn = document.querySelector('button[jsaction*="category"]');
             const category = catBtn ? catBtn.innerText.trim() : '';
 
+            // Ekstraksi Koordinat
             let latitude = '';
             let longitude = '';
             const coordMatch = currentUrl.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/) || currentUrl.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
             if (coordMatch) {
                 latitude = coordMatch[1];
                 longitude = coordMatch[2];
+            }
+
+            // Ekstraksi Rating & Jumlah Review
+            let rating = '0';
+            let totalReviews = '0';
+
+            const ratingEl = document.querySelector('div.F7nice span[aria-hidden="true"]');
+            if (ratingEl) rating = ratingEl.innerText.trim().replace(',', '.');
+
+            const reviewBtn = document.querySelector('div.F7nice button span, div.F7nice span:last-child');
+            if (reviewBtn) {
+                const rMatch = reviewBtn.innerText.replace(/\./g, '').match(/([\d]+)/);
+                if (rMatch) totalReviews = rMatch[1];
             }
 
             return {
@@ -111,7 +135,9 @@ async function scrapeSingleUrl(browser, url) {
                 category,
                 phones: phone,
                 latitude,
-                longitude
+                longitude,
+                rating,
+                totalReviews
             };
         }, url);
 
@@ -124,35 +150,29 @@ async function scrapeSingleUrl(browser, url) {
     }
 }
 
-// SCRAPE DENGAN PROTEKSI HARD-TIMEOUT 12 DETIK & AUTO-RETRY
 async function scrapeWithRetry(browser, url, index, total, retryCount = 0) {
-    // Race Promise: Jika 12 detik gak kelar, paksa return null
-    const timeoutPromise = new Promise(resolve => 
-        setTimeout(() => resolve('TIMEOUT'), 12000)
-    );
-
-    const result = await Promise.race([
-        scrapeSingleUrl(browser, url),
-        timeoutPromise
-    ]);
+    const timeoutPromise = new Promise(resolve => setTimeout(() => resolve('TIMEOUT'), 14000));
+    const result = await Promise.race([scrapeSingleUrl(browser, url), timeoutPromise]);
 
     if (result && result !== 'TIMEOUT') {
-        console.log(`[${index + 1}/${total}] [OK] ${result.name} | ${result.phones || '-'}`);
+        console.log(`[${index + 1}/${total}] [OK] ${result.name} | ⭐ ${result.rating} (${result.totalReviews} reviews)`);
+        updatePlaceCrawled(url, result);
         return result;
     }
 
     if (retryCount < MAX_RETRIES) {
-        console.log(` -> [RETRY ${retryCount + 1}] Stalled / Error pada URL [${index + 1}], mengulang...`);
+        console.log(` -> [RETRY ${retryCount + 1}] Ulang URL [${index + 1}]...`);
         return scrapeWithRetry(browser, url, index, total, retryCount + 1);
     }
 
     console.log(`[${index + 1}/${total}] [SKIP] Gagal setelah ${MAX_RETRIES}x coba.`);
+    updatePlaceFailed(url);
     return null;
 }
 
 (async () => {
     console.log(`\n==================================================`);
-    console.log(` ⚡ EXTRACTOR WITH AUTO-RETRY & AUTO-FLUSH RAM`);
+    console.log(` ⚡ EXTRACTOR DENGAN DATABASE TRACKING & REVIEWS`);
     console.log(`==================================================\n`);
 
     let categoryKeyword = await askQuestion('👉 Masukkan Kategori (misal: tempat spa / bengkel): ');
@@ -162,70 +182,40 @@ async function scrapeWithRetry(browser, url, index, total, retryCount = 0) {
     if (!['1', '2', '3'].includes(partNum)) partNum = '1';
 
     const categorySlug = categoryKeyword.toLowerCase().trim().replace(/\s+/g, '_');
+    const partInt = parseInt(partNum, 10);
     const JSON_FILE = path.join(__dirname, `urls_${categorySlug}_part${partNum}.json`);
     const OUTPUT_EXCEL = path.join(__dirname, `Hasil_${categorySlug}_Part_${partNum}.xlsx`);
 
     if (!fs.existsSync(JSON_FILE)) {
-        console.error(`\n[ERROR] File ${JSON_FILE} tidak ditemukan! Pastikan Fase 1 sudah selesai.`);
+        console.error(`\n[ERROR] File ${JSON_FILE} tidak ditemukan!`);
         process.exit(1);
     }
 
     const allUrls = JSON.parse(fs.readFileSync(JSON_FILE, 'utf8'));
-    const results = [];
+    initUrls(allUrls, categorySlug, partInt);
 
-    // RESUME DATA DARI EXCEL LAMA
-    if (fs.existsSync(OUTPUT_EXCEL)) {
-        try {
-            const workbook = new ExcelJS.Workbook();
-            await workbook.xlsx.readFile(OUTPUT_EXCEL);
-            const worksheet = workbook.getWorksheet('Sheet1');
-            
-            worksheet.eachRow((row, rowNumber) => {
-                if (rowNumber > 1) {
-                    results.push({
-                        name: row.getCell(1).value || '',
-                        fullAddress: row.getCell(2).value || '',
-                        email: row.getCell(3).value || '',
-                        category: row.getCell(4).value || '',
-                        phones: row.getCell(5).value || '',
-                        latitude: row.getCell(6).value || '',
-                        longitude: row.getCell(7).value || ''
-                    });
-                }
-            });
-            console.log(`[RESUME] Ditemukan file Excel lama dengan ${results.length} data tersimpan.`);
-        } catch (e) {
-            console.log(`[RESUME] Mulai ekstraksi dari awal.`);
-        }
-    }
-
-    const urlsToProcess = allUrls.slice(results.length);
+    // Ambil antrean URL yang statusnya belum CRAWLED dari SQLite
+    const urlsToProcess = getPendingUrls(categorySlug, partInt);
+    const completedData = getAllCrawledData(categorySlug, partInt);
 
     console.log(`\n--------------------------------------------------`);
     console.log(`Kategori      : "${categoryKeyword}"`);
     console.log(`Part          : Part ${partNum}`);
-    console.log(`Total URLs    : ${allUrls.length}`);
-    console.log(`Sudah Selesai : ${results.length} URL`);
-    console.log(`Sisa Process  : ${urlsToProcess.length} URL`);
-    console.log(`Speed Mode    : ${CONCURRENCY_LIMIT} Tab Sekaligus`);
+    console.log(`Total Target  : ${allUrls.length} URL`);
+    console.log(`Sudah Selesai : ${completedData.length} URL (Tercatat di DB)`);
+    console.log(`Sisa Antrean  : ${urlsToProcess.length} URL`);
     console.log(`--------------------------------------------------\n`);
 
     if (urlsToProcess.length === 0) {
-        console.log(`[SELESAI] Semua URL untuk Part ini sudah berhasil diekstrak!`);
+        console.log(`[SELESAI] Semua data part ini sudah berstatus CRAWLED.`);
+        await saveToExcel(completedData, OUTPUT_EXCEL);
         process.exit(0);
     }
 
-    // FUNGSI INIT BROWSER
     const launchBrowser = async () => {
         return await puppeteer.launch({ 
             headless: 'new',
-            args: [
-                '--no-sandbox', 
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-accelerated-2d-canvas',
-                '--disable-gpu'
-            ]
+            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
         });
     };
 
@@ -233,40 +223,35 @@ async function scrapeWithRetry(browser, url, index, total, retryCount = 0) {
     let processedInCurrentBrowser = 0;
 
     for (let i = 0; i < urlsToProcess.length; i += CONCURRENCY_LIMIT) {
-        // FLUSH RAM: Restart browser berkala
         if (processedInCurrentBrowser >= RESTART_BROWSER_EVERY) {
-            console.log(`\n🔄 [AUTO-FLUSH RAM] Mengubah dan mereset memori browser...`);
+            console.log(`\n🔄 [FLUSH RAM] Mereset browser session...`);
             await browser.close().catch(() => {});
             browser = await launchBrowser();
             processedInCurrentBrowser = 0;
         }
 
         const chunk = urlsToProcess.slice(i, i + CONCURRENCY_LIMIT);
-        
         const promises = chunk.map((url, chunkIdx) => {
-            const globalIndex = results.length + chunkIdx;
+            const globalIndex = completedData.length + i + chunkIdx;
             return scrapeWithRetry(browser, url, globalIndex, allUrls.length);
         });
 
-        const batchResults = await Promise.all(promises);
-        
-        batchResults.forEach(item => {
-            if (item) results.push(item);
-        });
-
+        await Promise.all(promises);
         processedInCurrentBrowser += chunk.length;
 
-        // Auto Save per 40 data
-        if (results.length % 40 === 0 || i + CONCURRENCY_LIMIT >= urlsToProcess.length) {
-            await saveToExcel(results, OUTPUT_EXCEL);
-            console.log(` -> [AUTO-SAVE] Total ${results.length} data terkunci ke Excel.`);
+        // Auto Save berkala ke Excel langsung dari query SQLite
+        if ((i + CONCURRENCY_LIMIT) % 30 === 0 || i + CONCURRENCY_LIMIT >= urlsToProcess.length) {
+            const currentResults = getAllCrawledData(categorySlug, partInt);
+            await saveToExcel(currentResults, OUTPUT_EXCEL);
+            console.log(` -> [CHECKPOINT] ${currentResults.length}/${allUrls.length} tersimpan di DB & Excel.`);
         }
     }
 
-    await saveToExcel(results, OUTPUT_EXCEL);
-    console.log(`\n==================================================`);
-    console.log(`[BERHASIL SELESAI FASE 2] Data tersimpan di: ${OUTPUT_EXCEL}`);
-    console.log(`==================================================\n`);
-
+    const finalResults = getAllCrawledData(categorySlug, partInt);
+    await saveToExcel(finalResults, OUTPUT_EXCEL);
     await browser.close().catch(() => {});
+
+    console.log(`\n==================================================`);
+    console.log(`[SUKSES] Total ${finalResults.length} data diekstrak ke ${OUTPUT_EXCEL}`);
+    console.log(`==================================================\n`);
 })();

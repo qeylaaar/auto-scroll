@@ -3,8 +3,8 @@ const XLSX = require('xlsx');
 const fs = require('fs');
 const path = require('path');
 const readline = require('readline');
+const { initUrls } = require('./db');
 
-// FUNGSI UNTUK MENANYAKAN INPUT DI TERMINAL
 function askQuestion(query) {
     const rl = readline.createInterface({
         input: process.stdin,
@@ -16,7 +16,6 @@ function askQuestion(query) {
     }));
 }
 
-// FUNGSI BACA WILAYAH DARI EXCEL PART
 function getDaftarWilayahFromPart(filePath) {
     const workbook = XLSX.readFile(filePath);
     const sheetName = workbook.SheetNames[0];
@@ -38,30 +37,21 @@ function getDaftarWilayahFromPart(filePath) {
     console.log(` 🗺️  GOOGLE MAPS CRAWLER INDONESIA (FASE 1)`);
     console.log(`==================================================\n`);
 
-    // 1. TANYA KATEGORI DULU
     let categoryKeyword = await askQuestion('👉 Masukkan Kata Kunci Kategori (misal: tempat spa / bengkel / tempat gym): ');
-    if (!categoryKeyword) {
-        categoryKeyword = 'tempat gym';
-        console.log(`[DEFAULT] Kata kunci kosong, menggunakan default: "${categoryKeyword}"`);
-    }
+    if (!categoryKeyword) categoryKeyword = 'tempat gym';
 
-    // 2. TANYA NOMOR PART
     let partNum = await askQuestion('👉 Pilih Nomor Part Wilayah (1 / 2 / 3): ');
-    if (!['1', '2', '3'].includes(partNum)) {
-        partNum = '1';
-        console.log(`[DEFAULT] Pilihan tidak valid, menggunakan default Part 1.`);
-    }
+    if (!['1', '2', '3'].includes(partNum)) partNum = '1';
 
     const categorySlug = categoryKeyword.toLowerCase().trim().replace(/\s+/g, '_');
     const EXCEL_PART_FILE = path.join(__dirname, `Data_Kabupaten_Kota_Part_${partNum}.xlsx`);
     const OUTPUT_JSON_FILE = path.join(__dirname, `urls_${categorySlug}_part${partNum}.json`);
 
     if (!fs.existsSync(EXCEL_PART_FILE)) {
-        console.error(`\n[ERROR] File ${EXCEL_PART_FILE} tidak ditemukan! Pastikan file Excel Part berada di folder project.`);
+        console.error(`\n[ERROR] File ${EXCEL_PART_FILE} tidak ditemukan!`);
         process.exit(1);
     }
 
-    // AUTO-SAVE REALTIME
     function loadSavedUrls() {
         if (fs.existsSync(OUTPUT_JSON_FILE)) {
             try {
@@ -74,21 +64,14 @@ function getDaftarWilayahFromPart(filePath) {
     }
 
     function saveUrlsToFile(urlSet) {
-        fs.writeFileSync(OUTPUT_JSON_FILE, JSON.stringify(Array.from(urlSet), null, 2));
+        const arr = Array.from(urlSet);
+        fs.writeFileSync(OUTPUT_JSON_FILE, JSON.stringify(arr, null, 2));
+        initUrls(arr, categorySlug, parseInt(partNum, 10)); // Sinkron ke SQLite
     }
 
-    console.log(`\n--------------------------------------------------`);
-    console.log(`Kategori    : "${categoryKeyword}"`);
-    console.log(`Part        : Part ${partNum}`);
-    console.log(`File Input  : ${EXCEL_PART_FILE}`);
-    console.log(`File Output : ${OUTPUT_JSON_FILE}`);
-    console.log(`--------------------------------------------------\n`);
-
     const listWilayah = getDaftarWilayahFromPart(EXCEL_PART_FILE);
-    console.log(`[INIT] Memuat ${listWilayah.length} wilayah dari Part ${partNum}.`);
-
     const collectedUrls = loadSavedUrls();
-    console.log(`[INIT] Data tersimpan sebelumnya: ${collectedUrls.size} URL.\n`);
+    console.log(`[INIT] Wilayah: ${listWilayah.length} | Data Tersimpan: ${collectedUrls.size} URL\n`);
 
     const browser = await puppeteer.launch({ 
         headless: false,
@@ -114,7 +97,6 @@ function getDaftarWilayahFromPart(filePath) {
                 continue;
             }
 
-            // Scroll panel kiri
             await page.evaluate(async () => {
                 const scrollableSection = document.querySelector('div[role="feed"]');
                 await new Promise((resolve) => {
@@ -124,7 +106,6 @@ function getDaftarWilayahFromPart(filePath) {
                     const timer = setInterval(() => {
                         scrollableSection.scrollBy(0, 1000);
                         const currentHeight = scrollableSection.scrollHeight;
-
                         const isEnd = document.body.innerText.includes("You've reached the end") || 
                                       document.body.innerText.includes("Anda telah mencapai akhir");
 
@@ -143,7 +124,6 @@ function getDaftarWilayahFromPart(filePath) {
                 });
             });
 
-            // Ekstrak link tempat
             const newUrls = await page.evaluate(() => {
                 const links = Array.from(document.querySelectorAll('div[role="feed"] a[href*="/maps/place/"]'));
                 return links.map(a => a.href);
@@ -157,7 +137,6 @@ function getDaftarWilayahFromPart(filePath) {
                 }
             });
 
-            // SIMPAN REALTIME PER WILAYAH
             saveUrlsToFile(collectedUrls);
             console.log(` -> +${addedCount} lokasi baru. [TOTAL: ${collectedUrls.size} URL]`);
 
@@ -166,10 +145,6 @@ function getDaftarWilayahFromPart(filePath) {
         }
     }
 
-    console.log(`\n==================================================`);
-    console.log(`[BERHASIL SELESAI FASE 1] Kategori "${categoryKeyword}" Part ${partNum}`);
-    console.log(`Total ${collectedUrls.size} URL tersimpan di: ${OUTPUT_JSON_FILE}`);
-    console.log(`==================================================\n`);
-
     await browser.close();
+    console.log(`\n[SELESAI] Data tersimpan di ${OUTPUT_JSON_FILE} & database SQLite.`);
 })();

@@ -1,6 +1,23 @@
+# Dependensi Node
+node_modules/
+npm-debug.log*
+
+# Database & SQLite files
+*.db
+*.sqlite
+*.sqlite3
+
+# Folder dump & crawler sementara
 dump/
+bank-scraper/
+
+# Output Scraping Excel & JSON
 *.xlsx
 *.json
+
+# Pengecualian file penting (Wajib tetap masuk Git)
 !package.json
 !package-lock.json
 !keywords_komoditi_final.json
+!Data_Kabupaten_Kota_Part_*.xlsx
+Task Crawling - Google Map.csv
