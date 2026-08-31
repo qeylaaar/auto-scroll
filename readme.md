@@ -6,17 +6,23 @@ Script ini bersifat universal (mendukung semua kategori kata kunci seperti: *Tem
 
 ---
 
-## 📊 Hasil Output Excel (9 Kolom Lengkap)
-Setiap task ekstraksi menghasilkan file Excel (.xlsx) dengan struktur kolom:
-1. Name — Nama Tempat / Unit Bisnis
-2. Fulladdress — Alamat Lengkap (bersih dari ikon unicode)
-3. Email — Alamat Email (jika tersedia)
-4. Categories — Kategori Resmi dari Google Maps
-5. Phones — Nomor Telepon
-6. Latitude — Koordinat Garis Lintang
-7. Longitude — Koordinat Garis Bujur
-8. Rating — Nilai Ulasan / Bintang (contoh: 4.8)
-9. Total Reviews — Jumlah Total Ulasan Pengguna (contoh: 1240)
+## 📊 Hasil Output Excel
+
+Struktur kolom file Excel (.xlsx) otomatis menyesuaikan mode yang dipilih pada Fase 2:
+
+### ⚡ Mode Cepat (7 Kolom Pokok)
+1. **Name** — Nama Tempat / Unit Bisnis
+2. **Fulladdress** — Alamat Lengkap (bersih dari karakter unicode)
+3. **Email** — Alamat Email (jika tersedia)
+4. **Categories** — Kategori Resmi dari Google Maps
+5. **Phones** — Nomor Telepon
+6. **Latitude** — Koordinat Garis Lintang
+7. **Longitude** — Koordinat Garis Bujur
+
+### 🌟 Mode Lengkap (9 Kolom + Reviews)
+Mencakup 7 kolom pokok di atas, ditambah:
+8. **Rating** — Nilai Ulasan / Bintang (contoh: `4.8`)
+9. **Total Reviews** — Jumlah Total Ulasan Pengguna (contoh: `1240`)
 
 ---
 
