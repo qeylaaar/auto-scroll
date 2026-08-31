@@ -112,4 +112,4 @@ Untuk mempercepat proses pengambilan data 3 part sekaligus di satu perangkat:
 
 ## 📄 Lisensi
 
-Proyek ini didistribusikan di bawah lisensi **MIT License** - lihat file [LICENSE](LICENSE) untuk detail selengkapnya.
+Proyek ini didistribusikan di bawah lisensi **MIT License** - lihat file [LICENSE](license) untuk detail selengkapnya.
